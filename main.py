@@ -75,3 +75,54 @@ else:
 
     with st.expander("상세 데이터 보기"):
         st.write(historical.sort_values(by='날짜', ascending=False))
+
+# --- 연도별 추이 분석 섹션 ---
+st.markdown("---")
+st.subheader("🗓️ 서울 기온 연도별 장기 추이")
+st.write("마우스를 그래프 위에 올리면 해당 연도의 상세 기온(평균/최저/최고)을 확인할 수 있습니다.")
+
+# 1. 연도별 데이터 그룹화
+df['연도'] = df['날짜'].dt.year
+yearly_data = df.groupby('연도').agg({
+    '평균기온(℃)': 'mean',
+    '최저기온(℃)': 'mean',
+    '최고기온(℃)': 'mean'
+}).reset_index()
+
+# 2. Plotly를 이용한 멀티 라인 그래프 생성
+fig_yearly = go.Figure()
+
+# 평균 기온 선
+fig_yearly.add_trace(go.Scatter(
+    x=yearly_data['연도'], y=yearly_data['평균기온(℃)'],
+    mode='lines', name='연평균 기온',
+    line=dict(color='orange', width=3),
+    hovertemplate='<b>%{x}년</b><br>평균: %{y:.2f}℃'
+))
+
+# 최고 기온 선
+fig_yearly.add_trace(go.Scatter(
+    x=yearly_data['연도'], y=yearly_data['최고기온(℃)'],
+    mode='lines', name='연평균 최고기온',
+    line=dict(color='red', width=1, dash='dot'),
+    hovertemplate='최고: %{y:.2f}℃'
+))
+
+# 최저 기온 선
+fig_yearly.add_trace(go.Scatter(
+    x=yearly_data['연도'], y=yearly_data['최저기온(℃)'],
+    mode='lines', name='연평균 최저기온',
+    line=dict(color='blue', width=1, dash='dot'),
+    hovertemplate='최저: %{y:.2f}℃'
+))
+
+# 3. 레이아웃 설정 (커서 위치 시 수직선 표시 등)
+fig_yearly.update_layout(
+    hovermode="x unified",  # 커서 위치의 모든 데이터를 한 번에 표시
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    xaxis_title="연도",
+    yaxis_title="기온 (℃)",
+    margin=dict(l=20, r=20, t=60, b=20)
+)
+
+st.plotly_chart(fig_yearly, use_container_width=True)
