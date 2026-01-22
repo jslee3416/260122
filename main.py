@@ -198,61 +198,6 @@ with st.expander("데이터 처리 상세 내역"):
     st.write(f"✅ **포함된 연도 수:** {len(clean_yearly)}개년")
     st.write(f"❌ **제외된 연도 (데이터 부족):** {sorted(list(excluded))}")
 
-from sklearn.linear_model import LinearRegression
-import numpy as np
-
-# --- [신규 섹션] 머신러닝 기온 예측 분석 ---
-st.markdown("---")
-st.subheader("🤖 머신러닝 기반 미래 기온 예측")
-st.write("선형 회귀 모델을 학습하여 향후 10년, 20년, 30년 뒤의 서울 평균 기온을 예측합니다.")
-
-# 1. 모델 학습 데이터 준비 (결측치 없는 연도별 데이터 사용)
-X = clean_yearly['연도'].values.reshape(-1, 1)
-y = clean_yearly['평균기온'].values
-
-# 2. 선형 회귀 모델 생성 및 학습
-model = LinearRegression()
-model.fit(X, y)
-
-# 3. 미래 연도 설정 및 예측
-future_years = np.array([2035, 2045, 2055]).reshape(-1, 1)
-predictions = model.predict(future_years)
-
-# 4. 결과 시각화 및 지표 출력
-p1, p2, p3 = st.columns(3)
-p1.metric("2035년 예상 평균기온", f"{predictions[0]:.2f}℃")
-p2.metric("2045년 예상 평균기온", f"{predictions[1]:.2f}℃")
-p3.metric("2055년 예상 평균기온", f"{predictions[2]:.2f}℃")
-
-# 5. 회귀선 그래프 추가
-# 전체 기간에 대한 회귀선 계산
-trend_line = model.predict(X)
-
-fig_predict = go.Figure()
-
-# 실제 데이터
-fig_predict.add_trace(go.Scatter(x=clean_yearly['연도'], y=y, mode='markers', name='실제 연평균', marker=dict(color='gray', opacity=0.5)))
-# 학습된 회귀선
-fig_predict.add_trace(go.Scatter(x=clean_yearly['연도'], y=trend_line, mode='lines', name='상승 추세선', line=dict(color='red', width=2)))
-# 미래 예측 지점
-fig_predict.add_trace(go.Scatter(x=[2035, 2045, 2055], y=predictions, mode='markers+text', 
-                                 name='미래 예측값', text=[f"{p:.2f}℃" for p in predictions],
-                                 textposition="top center", marker=dict(color='black', size=10, symbol='diamond')))
-
-fig_predict.update_layout(
-    title="서울 연평균 기온 상승 추세 및 미래 예측",
-    xaxis_title="연도",
-    yaxis_title="기온 (℃)",
-    showlegend=True
-)
-
-st.plotly_chart(fig_predict, use_container_width=True)
-
-with st.expander("🎓 선형 회귀 분석 결과 요약"):
-    slope = model.coef_[0]
-    st.write(f"📈 **기온 상승 속도:** 서울의 기온은 매년 약 **{slope:.4f}℃**씩 상승하고 있습니다.")
-    st.write(f"🌡️ **100년 환산:** 이 추세라면 100년 뒤 서울의 평균 기온은 현재보다 약 **{slope*100:.2f}℃** 더 높아질 것으로 예측됩니다.")
-
 
 import streamlit as st
 import pandas as pd
