@@ -252,3 +252,96 @@ with st.expander("🎓 선형 회귀 분석 결과 요약"):
     slope = model.coef_[0]
     st.write(f"📈 **기온 상승 속도:** 서울의 기온은 매년 약 **{slope:.4f}℃**씩 상승하고 있습니다.")
     st.write(f"🌡️ **100년 환산:** 이 추세라면 100년 뒤 서울의 평균 기온은 현재보다 약 **{slope*100:.2f}℃** 더 높아질 것으로 예측됩니다.")
+
+
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from sklearn.linear_model import LinearRegression
+import numpy as np
+
+# 페이지 설정
+st.set_page_config(page_title="서울 기온 & 열대야 분석기", layout="wide")
+
+@st.cache_data
+def load_data(file):
+    df = pd.read_csv(file, encoding='cp949', skiprows=7)
+    df.columns = [col.strip() for col in df.columns]
+    df['날짜'] = pd.to_datetime(df['날짜'].astype(str).str.replace('\t', ''))
+    for col in ['평균기온(℃)', '최저기온(℃)', '최고기온(℃)']:
+        df[col] = pd.to_numeric(df[col].astype(str).str.replace('\t', ''), errors='coerce')
+    return df
+
+st.title("🌡️ 서울 기온 추이 및 열대야 분석 리포트")
+
+# 데이터 로드
+uploaded_file = st.sidebar.file_uploader("추가 데이터 업로드", type="csv", key="ml_uploader")
+if uploaded_file:
+    df = load_data(uploaded_file)
+else:
+    df = load_data("ta_20260122174530.csv")
+
+# 연도별 기본 통계 계산
+df['연도'] = df['날짜'].dt.year
+yearly_stats = df.groupby('연도').agg({
+    '평균기온(℃)': ['mean', 'count'],
+    '최저기온(℃)': 'mean',
+    '최고기온(℃)': 'mean'
+})
+yearly_stats.columns = ['평균기온', '데이터개수', '최저기온', '최고기온']
+yearly_stats = yearly_stats.reset_index()
+
+# 360일 미만 데이터 제외 (전쟁 및 불완전한 해)
+clean_yearly = yearly_stats[yearly_stats['데이터개수'] >= 360].copy()
+
+# --- [섹션 1] 열대야 분석 ---
+st.header("🌙 연도별 열대야 발생 일수 변화")
+st.info("열대야 기준: 일 최저기온이 **25°C 이상**인 날")
+
+# 일별 데이터에서 최저기온 25도 이상인 날 카운트
+tropical_nights = df[df['최저기온(℃)'] >= 25].groupby('연도').size().reset_index(name='열대야일수')
+
+# 데이터가 부족한 해는 열대야 통계에서도 제외
+clean_tropical = tropical_nights[tropical_nights['연도'].isin(clean_yearly['연도'])]
+
+fig_tropical = px.bar(clean_tropical, x='연도', y='열대야일수',
+                      title="연도별 열대야 발생 일수 추이",
+                      color='열대야일수', color_continuous_scale='Reds')
+
+fig_tropical.update_layout(xaxis_title="연도", yaxis_title="발생 일수 (일)")
+st.plotly_chart(fig_tropical, use_container_width=True)
+
+# --- [섹션 2] 머신러닝 기온 예측 ---
+st.markdown("---")
+st.header("🤖 머신러닝 기반 미래 기온 예측")
+
+# 모델 학습
+X = clean_yearly['연도'].values.reshape(-1, 1)
+y = clean_yearly['평균기온'].values
+model = LinearRegression().fit(X, y)
+
+# 미래 예측 (10, 20, 30년 뒤)
+current_year = 2025
+future_years = np.array([current_year + 10, current_year + 20, current_year + 30]).reshape(-1, 1)
+future_preds = model.predict(future_years)
+
+c1, c2, c3 = st.columns(3)
+c1.metric(f"{future_years[0][0]}년 예상", f"{future_preds[0]:.2f}℃")
+c2.metric(f"{future_years[1][0]}년 예상", f"{future_preds[1]:.2f}℃")
+c3.metric(f"{future_years[2][0]}년 예상", f"{future_preds[2]:.2f}℃")
+
+# 시각화 (회귀선 포함)
+fig_ml = go.Figure()
+fig_ml.add_trace(go.Scatter(x=clean_yearly['연도'], y=y, mode='markers', name='실제 평균기온', marker=dict(color='gray', opacity=0.4)))
+fig_ml.add_trace(go.Scatter(x=clean_yearly['연도'], y=model.predict(X), mode='lines', name='기온 상승 추세선', line=dict(color='red', width=2)))
+fig_ml.add_trace(go.Scatter(x=future_years.flatten(), y=future_preds, mode='markers+text', 
+                            text=[f"{p:.1f}℃" for p in future_preds], textposition="top center",
+                            name='미래 예측값', marker=dict(color='black', size=10, symbol='diamond')))
+
+fig_ml.update_layout(title="서울 연평균 기온 장기 추세 및 미래 예측", xaxis_title="연도", yaxis_title="기온 (℃)", hovermode="x")
+st.plotly_chart(fig_ml, use_container_width=True)
+
+# 결론 출력
+slope = model.coef_[0]
+st.success(f"📈 분석 결과: 서울의 연평균 기온은 매년 약 **{slope:.4f}℃**씩 상승하고 있습니다. (100년 기준 약 **{slope*100:.2f}℃** 상승)")
