@@ -76,53 +76,124 @@ else:
     with st.expander("상세 데이터 보기"):
         st.write(historical.sort_values(by='날짜', ascending=False))
 
-# --- 연도별 추이 분석 섹션 ---
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from datetime import datetime
+
+# 1. 페이지 설정 (코드의 가장 처음에 딱 한 번만 와야 함)
+st.set_page_config(page_title="서울 기온 분석기", layout="wide")
+
+# 2. 데이터 로드 함수
+@st.cache_data
+def load_data(file):
+    try:
+        # 헤더 7행 스킵 (기상청 데이터 형식 대응)
+        df = pd.read_csv(file, encoding='cp949', skiprows=7)
+        df.columns = [col.strip() for col in df.columns]
+        
+        # 날짜 및 기온 데이터 정제 (\t 제거 및 수치화)
+        df['날짜'] = pd.to_datetime(df['날짜'].astype(str).str.replace('\t', ''))
+        for col in ['평균기온(℃)', '최저기온(℃)', '최고기온(℃)']:
+            df[col] = pd.to_numeric(df[col].astype(str).str.replace('\t', ''), errors='coerce')
+        return df
+    except Exception as e:
+        st.error(f"데이터 로드 중 오류 발생: {e}")
+        return None
+
+st.title("🌡️ 서울 기온 역대 비교 분석기")
+
+# 3. 데이터 로드 로직 (중복 방지를 위해 사이드바에 한 번만 선언)
+uploaded_file = st.sidebar.file_uploader("추가 기온 데이터 업로드 (CSV)", type="csv", key="main_uploader")
+
+if uploaded_file is not None:
+    df = load_data(uploaded_file)
+else:
+    # 기본 파일명 (리포지토리에 이 이름으로 파일이 있어야 함)
+    default_filename = "ta_20260122174530.csv"
+    df = load_data(default_filename)
+
+if df is None:
+    st.warning("데이터를 불러올 수 없습니다. 파일을 업로드해 주세요.")
+    st.stop()
+
+# --- [상단 섹션] 특정 날짜 분석 ---
+st.sidebar.header("📅 분석 날짜 설정")
+max_date = df['날짜'].max()
+target_date = st.sidebar.date_input("비교할 날짜 선택", max_date, key="main_date_picker")
+
+current_data = df[df['날짜'] == pd.Timestamp(target_date)]
+
+if not current_data.empty:
+    avg_temp = current_data['평균기온(℃)'].values[0]
+    month, day = target_date.month, target_date.day
+    
+    # 역대 같은 날짜 필터링
+    historical = df[(df['날짜'].dt.month == month) & (df['날짜'].dt.day == day)].dropna()
+    hist_avg = historical['평균기온(℃)'].mean()
+    rank = historical['평균기온(℃)'].rank(ascending=False).loc[current_data.index[0]]
+    total_y = len(historical)
+
+    st.subheader(f"📊 {target_date.strftime('%Y-%m-%d')} 기온 분석")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("선택한 날 평균", f"{avg_temp}℃")
+    col2.metric("평년(역대평균)", f"{hist_avg:.1f}℃", f"{avg_temp - hist_avg:.1f}℃")
+    col3.metric("기온 순위", f"{int(rank)}위", f"전체 {total_y}개년 중")
+
+# --- [하단 섹션] 연도별 장기 추이 분석 (필터링 로직 포함) ---
 st.markdown("---")
 st.subheader("🗓️ 서울 기온 연도별 장기 추이")
-st.write("마우스를 그래프 위에 올리면 해당 연도의 상세 기온(평균/최저/최고)을 확인할 수 있습니다.")
+st.info("💡 데이터 정확성을 위해 1년 데이터가 360일 미만인 해(전쟁 기간, 첫해/마지막해 등)는 자동으로 제외했습니다.")
 
-# 1. 연도별 데이터 그룹화
+# 연도별 통계 계산
 df['연도'] = df['날짜'].dt.year
-yearly_data = df.groupby('연도').agg({
-    '평균기온(℃)': 'mean',
+yearly_stats = df.groupby('연도').agg({
+    '평균기온(℃)': ['mean', 'count'],
     '최저기온(℃)': 'mean',
     '최고기온(℃)': 'mean'
-}).reset_index()
+})
+yearly_stats.columns = ['평균기온', '데이터개수', '최저기온', '최고기온']
+yearly_stats = yearly_stats.reset_index()
 
-# 2. Plotly를 이용한 멀티 라인 그래프 생성
+# 360일 이상의 온전한 데이터만 필터링 (첫해, 마지막해, 전쟁기간 자동 필터링)
+clean_yearly = yearly_stats[yearly_stats['데이터개수'] >= 360].copy()
+
+# 그래프 생성 (커서 통합 모드)
 fig_yearly = go.Figure()
 
-# 평균 기온 선
 fig_yearly.add_trace(go.Scatter(
-    x=yearly_data['연도'], y=yearly_data['평균기온(℃)'],
-    mode='lines', name='연평균 기온',
+    x=clean_yearly['연도'], y=clean_yearly['평균기온'],
+    mode='lines+markers', name='연평균',
     line=dict(color='orange', width=3),
-    hovertemplate='<b>%{x}년</b><br>평균: %{y:.2f}℃'
+    hovertemplate='평균: %{y:.2f}℃'
 ))
 
-# 최고 기온 선
 fig_yearly.add_trace(go.Scatter(
-    x=yearly_data['연도'], y=yearly_data['최고기온(℃)'],
-    mode='lines', name='연평균 최고기온',
+    x=clean_yearly['연도'], y=clean_yearly['최고기온'],
+    mode='lines', name='최고(평균)',
     line=dict(color='red', width=1, dash='dot'),
     hovertemplate='최고: %{y:.2f}℃'
 ))
 
-# 최저 기온 선
 fig_yearly.add_trace(go.Scatter(
-    x=yearly_data['연도'], y=yearly_data['최저기온(℃)'],
-    mode='lines', name='연평균 최저기온',
+    x=clean_yearly['연도'], y=clean_yearly['최저기온'],
+    mode='lines', name='최저(평균)',
     line=dict(color='blue', width=1, dash='dot'),
     hovertemplate='최저: %{y:.2f}℃'
 ))
 
-# 3. 레이아웃 설정 (커서 위치 시 수직선 표시 등)
 fig_yearly.update_layout(
-    hovermode="x unified",  # 커서 위치의 모든 데이터를 한 번에 표시
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    hovermode="x unified",
     xaxis_title="연도",
     yaxis_title="기온 (℃)",
-    margin=dict(l=20, r=20, t=60, b=20)
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
 )
 
 st.plotly_chart(fig_yearly, use_container_width=True)
+
+# 제외된 연도 정보 제공
+with st.expander("데이터 처리 상세 내역"):
+    excluded = set(yearly_stats['연도']) - set(clean_yearly['연도'])
+    st.write(f"✅ **포함된 연도 수:** {len(clean_yearly)}개년")
+    st.write(f"❌ **제외된 연도 (데이터 부족):** {sorted(list(excluded))}")
